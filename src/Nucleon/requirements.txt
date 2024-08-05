@@ -1,0 +1,8 @@
+boto3
+botocore
+faiss-cpu
+langchain
+PyPDF2
+urllib3
+langchain-community
+
