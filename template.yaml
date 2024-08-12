@@ -17,47 +17,6 @@ Globals:
         LOG_LEVEL: INFO
 
 Resources:    
-  DocumentBucket:
-    Type: "AWS::S3::Bucket"
-    Properties:
-      BucketName: !Sub "${AWS::StackName}-${AWS::Region}-${AWS::AccountId}"
-      CorsConfiguration:
-        CorsRules:
-          - AllowedHeaders:
-              - "*"
-            AllowedMethods:
-              - GET
-              - PUT
-              - HEAD
-              - POST
-              - DELETE
-            AllowedOrigins:
-              - "*"
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-
-  DocumentBucketPolicy:
-    Type: "AWS::S3::BucketPolicy"
-    Properties:
-      Bucket: !Ref DocumentBucket
-      PolicyDocument:
-        Id: EnforceHttpsPolicy
-        Version: "2012-10-17"
-        Statement:
-          - Sid: EnforceHttpsSid
-            Effect: Deny
-            Principal: "*"
-            Action: "s3:*"
-            Resource:
-              - !Sub "arn:aws:s3:::${DocumentBucket}/*"
-              - !Sub "arn:aws:s3:::${DocumentBucket}"
-            Condition:
-              Bool:
-                "aws:SecureTransport": "false"
-
   Api:
     Type: AWS::Serverless::Api
     Properties:
@@ -80,8 +39,8 @@ Resources:
               Action:
                 - "s3:*"
               Resource:
-                - "arn:aws:s3:::nucleus-demo-jyoti"
-                - "arn:aws:s3:::nucleus-demo-jyoti/*"
+                - "arn:aws:s3:::nucleon-test-bucket"
+                - "arn:aws:s3:::nucleon-test-bucket/*"
         - Statement:
             - Sid: "BedrockScopedAccess"
               Effect: "Allow"
@@ -95,6 +54,15 @@ Resources:
               Action:
                 - "textract:*"
               Resource: "*"
+        - Statement:
+            - Sid: "SSMAccess"
+              Effect: "Allow"
+              Action:
+                - "ssm:GetParameter"
+                - "ssm:GetParameters"
+                - "ssm:GetParametersByPath" # Add other SSM actions as needed
+                - "ssm:PutParameter"
+              Resource: "*"
       Environment:
         Variables:
           FOLDER_PATH: "final-testing/final-testing/Banyan-Hospital/SUNIL-JOHARY"
@@ -104,4 +72,72 @@ Resources:
           Properties:
             RestApiId: !Ref Api
             Path: /Nucleon
+            Method: POST
+      
+  RequestApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/Request_api/
+      Timeout: 480
+      MemorySize: 2048
+      Policies:
+        - Statement:
+            - Sid: "InvokeRequestApiFunction"
+              Effect: "Allow"
+              Action: "lambda:InvokeFunction"
+              Resource: !GetAtt NucleonFunction.Arn
+              # NUCLEON_FUNCTION_ARN: !GetAtt NucleonFunction.Arn
+        - Statement:
+            - Sid: "FullAccessToS3Bucket"
+              Effect: "Allow"
+              Action:
+                - "s3:*"
+              Resource:
+                - "arn:aws:s3:::nucleon-test-bucket"
+                - "arn:aws:s3:::nucleon-test-bucket/*"
+                - "arn:aws:s3:::nucleus-demo-jyoti/*"
+                - "arn:aws:s3:::nucleus-demo-jyoti/"
+        - Statement:
+            - Sid: "SSMAccess"
+              Effect: "Allow"
+              Action:
+                - "ssm:GetParameter"
+                - "ssm:GetParameters"
+                - "ssm:GetParametersByPath" # Add other SSM actions as needed
+                - "ssm:PutParameter"
+              Resource: "*"
+      Environment:
+        Variables:
+          FOLDER_PATH: "final-testing/final-testing/Banyan-Hospital/SUNIL-JOHARY"
+          NUCLEON_FUNCTION_ARN: !GetAtt NucleonFunction.Arn
+      Events:
+        Root:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /requestapi
+            Method: POST
+
+  ResponseApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/Response_api/
+      Timeout: 480
+      MemorySize: 2048
+      Policies:
+        - Statement:
+            - Sid: "SSMAccess"
+              Effect: "Allow"
+              Action:
+                - "ssm:GetParameter"
+                - "ssm:GetParameters"
+                - "ssm:GetParametersByPath" # Add other SSM actions as needed
+                - "ssm:PutParameter"
+              Resource: "*"
+      Events:
+        Root:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /responseapi
             Method: POST
