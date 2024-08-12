@@ -1,96 +1,120 @@
 import boto3
-import PyPDF2
 from io import BytesIO
 import json
 import datetime
 import os
+# import PyPDF2
+from pdf2image import convert_from_path
+from PIL import Image
+import tempfile
+from botocore.config import Config
+import requests
+from PIL import Image
+import io
+from langchain.chains import LLMMathChain, LLMChain
+from langchain.agents.agent_types import AgentType
+from langchain.agents import Tool, initialize_agent
+from langchain.prompts import PromptTemplate
+from langchain_aws import ChatBedrock
 
-s3 = boto3.client('s3')
-textract = boto3.client('textract')
-
-Bucket = "nucleus-demo-jyoti"
-# folder_path = "final-testing/final-testing/Banyan-Hospital/SUNIL-JOHARY"
-FOLDER_PATH = os.getenv('FOLDER_PATH')
-print("222",FOLDER_PATH)
-
-pdf_text = ""
-image_text = ""
+images_dir = '/tmp/images'
 supported_image_formats = ('.jpeg', '.jpg', '.png')
 
-bedrock_runtime = boto3.client(
+s3 = boto3.client('s3')
+ssm_client = boto3.client('ssm')
+textract = boto3.client('textract')
+
+bedrock_runtime = boto3.client( 
         service_name="bedrock-runtime",
         region_name="us-east-1",
     )
 
-
-# List all objects in the bucket
-response = s3.list_objects_v2(Bucket=Bucket , Prefix=FOLDER_PATH)
-
-# Check if the bucket contains any objects
-if 'Contents' in response:
-    for obj in response['Contents']:
-        print(obj['Key'])
-else:
-    print("Bucket is empty or does not exist.")
-
-
-# Data JSON structure
 data_json = {
-    "total bill amount": "",
-    "billing date": "",
-    "hospital bill number": "",
-    "room type":"",
-    "room charges": "",
-    "visit charges": "",
-    "surgeon charges": "",
-    "OT charges": "",
-    "Anesthesia charges": "",
-    "Assitant surgeon charges": "",
-    "Pathology charges": "",
-    "Pharmacy charges": "",
-    "Minor procedure charges": "",
-    "Radiology charges": "",
-    "other charges": ""
-}
+        "total bill amount": "",
+        "billing date": "",
+        "hospital bill number": "",
+        "room type":"",
+        "room charges": "",
+        "visit charges": "",
+        "surgeon charges": "",
+        "OT charges": "",
+        "Anesthesia charges": "",
+        "Assitant surgeon charges": "",
+        "Pathology charges": "",
+        "Pharmacy charges": "",
+        "Minor procedure charges": "",
+        "Radiology charges": "",
+        "other charges": ""
+    }
 
 data_json_str = json.dumps(data_json)
 
+# @logger.inject_lambda_context(log_event=True)
+def lambda_handler(event, context):
+    job_id = event['job_id']
+    links = event.get('links', [])
+    print(f"Links received: {links}")
+    image_text = ""
+    pdf_image_text = ""
 
-if 'Contents' in response:
-    for obj in response['Contents']:
-        key = obj['Key']
+    # Download each file from the links
+    for link in links:
+        url_parts = link.split('/')
+        # print("url", url_parts)
+        bucket_name1 = url_parts[2]
+        if '.s3.amazonaws.com' in bucket_name1:
+            bucket_name = bucket_name1.rstrip('.s3.amazonaws.com')
+        else:
+            bucket_name = bucket_name1
+
+        print("er",bucket_name)
+
+        object_key = '/'.join(url_parts[3:])
         
-        # Check if the object is a PDF
-        if key.lower().endswith('.pdf'):
-            # Download the PDF file from S3
-            pdf_obj = s3.get_object(Bucket=Bucket, Key=key)
-            pdf_data = pdf_obj['Body'].read()
-            
-            # Extract text from the PDF using PyPDF2
-            pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_data))
-            for page in pdf_reader.pages:
-                pdf_text += page.extract_text() + "\n"
-        
-        # Check if the object is an image
-        elif key.lower().endswith(supported_image_formats):
+        print("key",object_key)
+
+        if object_key.lower().endswith(supported_image_formats):
             # Call Textract to extract text from the image
             textract_response = textract.detect_document_text(
-                Document={'S3Object': {'Bucket': Bucket, 'Name': key}}
+                Document={'S3Object': {'Bucket': bucket_name, 'Name': object_key}}
             )
-            
+
             # Extract text blocks from the response
             for block in textract_response['Blocks']:
                 if block['BlockType'] == 'LINE':
                     image_text += block['Text'] + "\n"
-else:
-    print("Bucket is empty or does not exist.")
+            # print("image_text_123", image_text)
+        elif object_key.lower().endswith('.pdf'):
+            local_path = '/tmp/' + object_key.split('/')[-1]
+            print("Local path:", local_path)
+            s3.download_file(bucket_name, object_key, local_path)
 
-combined_text = pdf_text + image_text
+            images = convert_from_path(local_path)
+            base_name = os.path.splitext(object_key.split('/')[-1])[0]
+            print("base_name",base_name)
 
+            # Process each image without uploading to S3
+            for i, image in enumerate(images):
+                image_file_name = f'{base_name}_{i+1}.png'
+                # Save the image to a BytesIO object
+                with io.BytesIO() as buffer:
+                    image.save(buffer, format='PNG')
+                    buffer.seek(0)
+                    
+                    # Send image to Textract
+                    textract_response = textract.detect_document_text(
+                        Document={'Bytes': buffer.getvalue()}
+                    )
+                    
+                    # Extract text blocks from the response
+                    for block in textract_response['Blocks']:
+                        if block['BlockType'] == 'LINE':
+                            pdf_image_text += block['Text'] + "\n"
+                    # print(f"Extracted text from {image_file_name}:", pdf_image_text)
+            # print(f"Extracted text from {image_file_name}:", pdf_image_text)
 
-# @logger.inject_lambda_context(log_event=True)
-def lambda_handler(event, context):
-    # event_body = json.loads(event["Records"][0]["body"])
+    combined_text = image_text + pdf_image_text
+    
 
     body = json.dumps({
         "anthropic_version": "bedrock-2023-05-31",
@@ -121,37 +145,45 @@ def lambda_handler(event, context):
         ],
     })
 
-    # Send the request to the Bedrock model
-    print("Request sent to Bedrock model")
-    print(datetime.datetime.now())
-    response = bedrock_runtime.invoke_model(
-        modelId="anthropic.claude-3-sonnet-20240229-v1:0",
-        body=body
-    )
-    
-    # Send the request to the Bedrock model
-    print("Request sent to Bedrock model")
-    print(datetime.datetime.now())
     response = bedrock_runtime.invoke_model(
         modelId="anthropic.claude-3-sonnet-20240229-v1:0",
         body=body
     )
 
-    # Read and parse the response
+    # # Read and parse the response
     response_body = json.loads(response.get("body").read())
 
     # Extracted entities
     print("Response from Bedrock model:")
     print(response_body)
-    result=response_body['content'][0]['text']
+    result = response_body['content'][0]['text']
 
      # Parse the result string to JSON
     try:
         result_json = json.loads(result)
-        print(json.dumps(result_json, indent=4))
+        # print(json.dumps(result_json, indent=4))
     except json.JSONDecodeError as e:
         print(f"JSON decode error: {e}")
         result_json = {"error": "Failed to parse JSON response"}
+
+
+
+    # response_value = "Example Response from Secondary Lambda"
+
+    combined_result = {
+        "status": "Done",
+        "response": result_json
+    }
+
+    combined_result_str = json.dumps(combined_result)
+
+    ssm_client.put_parameter(
+        Name=job_id,
+        Value=combined_result_str,
+        Type='String',
+        Overwrite=True
+    )
+    
 
     # print(result)
 
@@ -163,5 +195,5 @@ def lambda_handler(event, context):
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "*",
         },
-        "body": json.dumps(result_json),
+        "body": json.dumps(combined_result_str),
     }
