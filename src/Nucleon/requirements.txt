@@ -1,9 +1,11 @@
-
+pymupdf
 boto3
 botocore
-faiss-cpu
+# faiss-cpu
 langchain
 langchain-community
 pdf2image
-Pillow
 langchain_aws
+# tesseract-ocr
+pytesseract
+pymupdf
