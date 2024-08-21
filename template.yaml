@@ -10,7 +10,7 @@ Globals:
     Runtime: python3.11
     Handler: main.lambda_handler
     Architectures:
-      - arm64
+      - x86_64
     Tracing: Active
     Environment:
       Variables:
