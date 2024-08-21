@@ -16,13 +16,12 @@ def invoke_secondary_lambda_async(payload):
     )
     return response
 
-job_id = str(uuid.uuid4())
-parameter_name = job_id
-print("1",parameter_name)
-
 def lambda_handler(event, context):
     print("event",event)
     body_dict = json.loads(event['body'])
+    job_id = str(uuid.uuid4())
+    parameter_name = job_id
+    print("1",parameter_name)
     processing_links = body_dict.get('links', [])
     links = []
     for link in processing_links:
@@ -61,5 +60,5 @@ def lambda_handler(event, context):
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "*",
         },
-        "body": json.dumps("In Progress"),
+        "body": json.dumps(job_id),
     }
