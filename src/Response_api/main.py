@@ -19,8 +19,17 @@ def lambda_handler(event, context):
     print(f"Extracted job_id: {job_id}")
     parameter_name = job_id
     response = ssm_client.get_parameter(Name=parameter_name)
+    print("jyoti",response)
     # job_status = response['Parameter']['Value']
-    job_status = json.loads(response['Parameter']['Value'])
+    # job_status = json.loads(response['Parameter']['Value'])
+
+    # First attempt to parse the value as JSON
+    try:
+        job_status = json.loads(response['Parameter']['Value'])
+    except json.JSONDecodeError:
+            # If JSON parsing fails, use the raw string value
+        # logger.warning("Failed to decode JSON, using raw string")
+        job_status = response['Parameter']['Value']
     print(f"Job status: {job_status}")
     
     # Return the response immediately
